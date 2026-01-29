@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Elegí tu plan</title>
+  <style>
+    :root { font-family: system-ui, Arial, sans-serif; }
+    body { margin: 0; background: #0b1220; color: #eaf0ff; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 28px 18px; }
+    .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 18px; }
+    h1 { margin: 0 0 10px; font-size: 24px; }
+    p { margin: 6px 0 14px; opacity: .9; line-height: 1.45; }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .group { border-radius: 14px; padding: 14px; background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.08); }
+    .group h2 { margin: 0 0 10px; font-size: 16px; opacity: .95; }
+    .choices { display: flex; gap: 10px; flex-wrap: wrap; }
+    button.choice {
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.08);
+      color: #eaf0ff;
+      padding: 10px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform .05s ease, background .2s ease, border .2s ease;
+      user-select: none;
+    }
+    button.choice:hover { background: rgba(255,255,255,.12); }
+    button.choice:active { transform: scale(.98); }
+    button.choice[data-selected="true"] {
+      background: rgba(120,170,255,.25);
+      border-color: rgba(120,170,255,.55);
+    }
+    .actions { display:flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .primary, .ghost {
+      padding: 12px 14px; border-radius: 12px; cursor: pointer; font-weight: 600;
+      border: 1px solid rgba(255,255,255,.18);
+    }
+    .primary { background: rgba(120,170,255,.22); }
+    .ghost { background: rgba(255,255,255,.06); }
+    .result { margin-top: 16px; padding: 14px; border-radius: 14px; background: rgba(0,0,0,.22); border: 1px solid rgba(255,255,255,.10); }
+    .badge { display:inline-block; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.14); margin-bottom: 10px; }
+    .invite { white-space: pre-wrap; font-size: 15px; line-height: 1.5; }
+    .muted { opacity: .75; font-size: 12px; margin-top: 10px; }
+    .error { color: #ffb4b4; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Mini juego: armemos el plan</h1>
+      <p>Elegí 3 opciones. Cuando confirmes, se guarda y la próxima vez vas a ver siempre la misma invitación (hasta que resetees).</p>
+
+      <div id="game"></div>
+
+      <div id="result" class="result" style="display:none;"></div>
+      <div id="err" class="error"></div>
+    </div>
+  </div>
+
+<script>
+  const STORAGE_KEY = "plan_invitacion_v1";
+
+  const state = {
+    comida: null,     // "cena" | "almuerzo"
+    actividad: null,  // "karaoke" | "bolos"
+    momento: null     // "dia" | "noche"
+  };
+
+  const templates = [
+`📩 Invitación oficial
+
+Señor/a invitado/a:
+
+Estás cordialmente invitado/a a un {comida} con {actividad} por la {momentoText}.
+Código de vestimenta: “vengo a ganar (o a cantar)”.
+Hora: {hora}
+Lugar: secreto hasta que respondas “sí”.
+
+¿Aceptás? 😄`,
+
+`✨ Plan confirmado
+
+Te propongo: {comida} + {actividad} por la {momentoText}.
+Prometo risas, competencia sana y un final épico.
+Hora estimada: {hora}
+
+Respondé con:
+✅ “voy”
+❌ “me da miedo perder”`
+  ];
+
+  function momentoText(m) {
+    return m === "dia" ? "día" : "noche";
+  }
+  function horaPorMomento(m) {
+    return m === "dia" ? "13:00" : "21:00";
+  }
+
+  function buildInvitation({ comida, actividad, momento }) {
+    // elegimos una plantilla pseudo-aleatoria pero determinística según selección
+    const seed = (comida + "|" + actividad + "|" + momento)
+      .split("")
+      .reduce((a,c)=>a + c.charCodeAt(0), 0);
+
+    const tmpl = templates[seed % templates.length];
+    return tmpl
+      .replaceAll("{comida}", comida)
+      .replaceAll("{actividad}", actividad)
+      .replaceAll("{momentoText}", momentoText(momento))
+      .replaceAll("{hora}", horaPorMomento(momento));
+  }
+
+  function renderGame() {
+    const root = document.getElementById("game");
+    root.innerHTML = `
+      <div class="grid">
+        ${renderGroup("Comida", "comida", [
+          ["almuerzo","Almuerzo"],
+          ["cena","Cena"]
+        ])}
+
+        ${renderGroup("Actividad", "actividad", [
+          ["karaoke","Karaoke"],
+          ["bolos","Bolos"]
+        ])}
+
+        ${renderGroup("Momento", "momento", [
+          ["dia","Día"],
+          ["noche","Noche"]
+        ])}
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="confirm">Confirmar elección</button>
+        <button class="ghost" id="reset">Resetear</button>
+      </div>
+      <div class="muted">Tip: si ya confirmaste antes, se carga tu invitación automáticamente.</div>
+    `;
+
+    root.querySelectorAll("button.choice").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.key;
+        const val = btn.dataset.value;
+        state[key] = val;
+        updateSelectedUI();
+        clearError();
+      });
+    });
+
+    document.getElementById("confirm").addEventListener("click", onConfirm);
+    document.getElementById("reset").addEventListener("click", onReset);
+
+    updateSelectedUI();
+  }
+
+  function renderGroup(title, key, options) {
+    return `
+      <div class="group">
+        <h2>${title}</h2>
+        <div class="choices">
+          ${options.map(([value,label]) => `
+            <button class="choice" data-key="${key}" data-value="${value}" data-selected="false">${label}</button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function updateSelectedUI() {
+    document.querySelectorAll("button.choice").forEach(btn => {
+      const key = btn.dataset.key;
+      const val = btn.dataset.value;
+      btn.dataset.selected = (state[key] === val) ? "true" : "false";
+    });
+  }
+
+  function showResult(invite, locked = true) {
+    const box = document.getElementById("result");
+    box.style.display = "block";
+    box.innerHTML = `
+      <div class="badge">${locked ? "Guardado ✅" : "Vista previa"}</div>
+      <div class="invite">${escapeHtml(invite)}</div>
+    `;
+  }
+
+  function hideResult() {
+    const box = document.getElementById("result");
+    box.style.display = "none";
+    box.innerHTML = "";
+  }
+
+  function onConfirm() {
+    if (!state.comida || !state.actividad || !state.momento) {
+      setError("Elegí una opción en cada categoría antes de confirmar 🙂");
+      return;
+    }
+    const invitation = buildInvitation(state);
+    const payload = {
+      state: { ...state },
+      invitation,
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    showResult(invitation, true);
+  }
+
+  function onReset() {
+    localStorage.removeItem(STORAGE_KEY);
+    state.comida = state.actividad = state.momento = null;
+    updateSelectedUI();
+    hideResult();
+    clearError();
+  }
+
+  function loadIfExists() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    try {
+      const payload = JSON.parse(raw);
+      if (payload?.state?.comida && payload?.state?.actividad && payload?.state?.momento && payload?.invitation) {
+        state.comida = payload.state.comida;
+        state.actividad = payload.state.actividad;
+        state.momento = payload.state.momento;
+        renderGame();
+        showResult(payload.invitation, true);
+      }
+    } catch {}
+  }
+
+  function setError(msg) { document.getElementById("err").textContent = msg; }
+  function clearError() { document.getElementById("err").textContent = ""; }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  renderGame();
+  loadIfExists();
+</script>
+</body>
+</html>
